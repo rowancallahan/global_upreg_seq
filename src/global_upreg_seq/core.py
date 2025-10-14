@@ -1,19 +1,15 @@
 import torch
-import numpy as np
-import pandas as pd
 from tqdm import tqdm
 
 import pyro
 import pyro.distributions as dist
-
 from pyro.infer import Predictive, SVI, Trace_ELBO, TraceMeanField_ELBO, Importance, TraceEnum_ELBO
 from pyro.infer.autoguide import AutoNormal, AutoDelta
 from pyro.optim import Adam, ClippedAdam
 
 import pyro.poutine as poutine
-from pyro.nn import PyroModule
-from pyro.nn import PyroSample
-from pyro.ops import einsum
+from .models import base_guide 
+
 
 def generate_simulated_data(group_size,
                             gene_size=40000,
@@ -115,18 +111,13 @@ def zinb_reparam(mean, variance, zero_inflation, eps=1e-6):
     return zinb
 
 
-def prepare_initialization(counts_observed, zero_inflated=False, labels=None, group_size=None):
-
-    if (labels is None) and (group_size is None):
-        raise ValueError("Either one of labels for deseq calculation or group size for generalized testing must be supplied")
-    if labels is not None:
-        raise NotImplementedError("labels not yet implemented here")
+def prepare_initialization(counts_observed, labels, zero_inflated=False, group_size=None):
 
     #change the zero increase if you are not doing single cell,
     #TODO add padding for single cell and make this an option
     log_gm = torch.mean(torch.log(counts_observed+0.0001), dim=0)
     strict_mask = torch.isfinite(log_gm)
-    happy_mask = torch.ones(gene_size, dtype=torch.bool)
+    happy_mask = torch.ones(counts_observed.shape[1], dtype=torch.bool)
     mask=strict_mask
     
     #now we calculate an easy best first estimate for base means here
@@ -140,15 +131,15 @@ def prepare_initialization(counts_observed, zero_inflated=False, labels=None, gr
     #first we take the ratio against the geometric mean                           
     ratios = torch.log(counts_observed[:, strict_mask]+0.0001) - log_gm[strict_mask]        # log ratios
     log_size_factors = torch.median(ratios, dim=1).values               # per-sample log-SF
-    size_factors_0 = log_size_factors[0:group_size]-torch.mean(log_size_factors[0:group_size])
-    size_factors_1 = log_size_factors[group_size:]-torch.mean(log_size_factors[group_size:])
-    initial_size_factors = torch.cat([size_factors_0, size_factors_1])
+
+    initial_size_factors = log_size_factors - torch.where(labels.bool(), 
+        log_size_factors[labels.bool()].mean(), log_size_factors[~labels.bool()].mean())
      
     return(initial_size_factors, log_mu0_start)
 
 
 def train(data,
-          label,
+          labels,
           model,
           num_iterations=1500,
           guide=None,
@@ -157,14 +148,14 @@ def train(data,
     
     losses=[]
     logp_size_hist = []
-
     #SETTING UP GUIDE AND OPTIMIZER HERE
     if optim is None:
-        optim=  ClippedAdam({"lr": 0.1, "clip_norm": 100.0, "lrd":0.0005**(1/train_num)})
+        optim=  ClippedAdam({"lr": 0.1, "clip_norm": 100.0, "lrd":0.0005**(1/num_iterations)})
     if guide is None:
-        initial_sf, log_mean_start = prepare_initialization(data, labels=label)
+        initial_sf, log_mean_start = prepare_initialization(data, labels= labels)
+
         guide = base_guide(model, initial_sf, log_mean_start)
-    
+
     #SVI TO OPTIMIZE HERE
     svi = SVI(model,guide,optim,
     loss=TraceEnum_ELBO(max_plate_nesting=2) if loss is None else loss)
@@ -173,11 +164,11 @@ def train(data,
     pbar = tqdm(range(num_iterations))
     pbar_loss = 1e37
     for j in pbar:
-        loss = svi.step(data,y=label)
+        loss = svi.step(data,y=labels)
         if j %50 == 0:
             pbar_loss = loss
             with torch.no_grad():
-                trace = poutine.trace(model).get_trace(data, label)
+                trace = poutine.trace(model).get_trace(data, labels)
                 trace.compute_log_prob()
                 logp_size = trace.nodes["log_size_factor"]["log_prob_sum"].item()
                 logp_size_hist.append(logp_size)
