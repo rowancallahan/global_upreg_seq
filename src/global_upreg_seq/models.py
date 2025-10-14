@@ -8,6 +8,8 @@ import pyro.distributions as dist
 
 from pyro.infer import Predictive, SVI, Trace_ELBO, TraceMeanField_ELBO, Importance, TraceEnum_ELBO
 from pyro.infer.autoguide import AutoNormal, AutoDelta
+from pyro.infer.autoguide.initialization import init_to_value
+
 from pyro.optim import Adam, ClippedAdam
 
 import pyro.poutine as poutine
@@ -54,4 +56,16 @@ class factor_model_poisson(PyroModule):
                 log_mu = log_mu.squeeze()
                 mu = torch.exp(log_mu+log_size_factor).clamp(min=1e-30, max=1e30)
                 pyro.sample("obs", dist.Poisson(mu), obs=x)
+
+
+def base_guide(model, initial_size_factors, log_mu0_start):
+
+    guide = AutoNormal(
+        poutine.block(model, hide=['global_upreg_true']),
+        init_loc_fn=init_to_value(values={"log_size_factor": initial_size_factors.unsqueeze(-1),
+                                         "log_mu0": log_mu0_start.unsqueeze(0) })
+    )
+    
+    return(guide)
+
 
