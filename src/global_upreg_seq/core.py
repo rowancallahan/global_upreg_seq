@@ -17,12 +17,12 @@ from pyro.ops import einsum
 
 def generate_simulated_data(group_size,
                             gene_size=40000,
-                            distribution_type="negative_binomial"
-                            median_log_upreg = 0.7
-                            downreg_fraction = -0.66
-                            zero_inflation = 0.2
+                            distribution_type="negative_binomial",
+                            median_log_upreg = 0.7,
+                            downreg_fraction = -0.66,
+                            zero_inflation = 0.2,
                             overdispersion_factor = 0.2,
-                            log_base_mean_val = 5)
+                            log_base_mean_val = 5):
 
 
     group_size=group_size
@@ -32,7 +32,6 @@ def generate_simulated_data(group_size,
                            for test,sample in
                            zip(torch.rand(gene_size), (torch.randn(gene_size)+median_log_upreg)) ])
     
-    distribution_type = "poisson"
     base_dist = None
     upreg_dist = None
     if distribution_type=="poisson":
@@ -45,7 +44,7 @@ def generate_simulated_data(group_size,
         upreg_dist = dist.ZeroInflatedPoisson(torch.exp(log_base_means+log_fc), gate= constant_gate)
 
     elif distribution_type == "negative_binomial":
-        constant_gate = [0.0]*zero_inflation
+        constant_gate = torch.rand(gene_size)*zero_inflation
         overdisperse = torch.rand(gene_size)*overdispersion_factor
 
         base_dist = zinb_reparam(torch.exp(log_base_means),
@@ -116,7 +115,7 @@ def zinb_reparam(mean, variance, zero_inflation, eps=1e-6):
     return zinb
 
 
-def prepare_initialization(counts_observed, zero_inflated=False, labels=None, group_size=None)
+def prepare_initialization(counts_observed, zero_inflated=False, labels=None, group_size=None):
 
     if (labels is None) and (group_size is None):
         raise ValueError("Either one of labels for deseq calculation or group size for generalized testing must be supplied")
