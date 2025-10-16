@@ -8,8 +8,10 @@ from pyro.infer.autoguide import AutoNormal, AutoDelta
 from pyro.optim import Adam, ClippedAdam
 
 import pyro.poutine as poutine
-from .models import base_guide 
+from .models import base_guide
 
+import numpy as np
+import matplotlib.pyplot as plt
 
 def generate_simulated_data(group_size,
                             gene_size=40000,
@@ -72,7 +74,7 @@ def generate_simulated_data(group_size,
     size_factors = size_factors_dist.sample((group_size*2,))
     counts_observed= (combined_samples * size_factors.unsqueeze(-1)).round()
 
-    return (counts_observed, labels)
+    return (counts_observed, labels, (log_fc, size_factors, log_base_means))
 
 
 
@@ -178,3 +180,74 @@ def train(data,
 
     return(model, guide, (losses, logp_size_hist))
 
+
+def calculate_foldchange_bf(guide, cutoff, make_plot=True):
+    log_fc_loc = torch.abs(guide.locs.log_fc.detach())
+    log_fc_scale = guide.scales.log_fc
+    cutoff = torch.tensor(cutoff)
+    dist = torch.distributions.Normal(loc=log_fc_loc, scale=log_fc_scale)
+    
+    bayes_factor = (1 - dist.cdf(cutoff)) / dist.cdf(cutoff)
+    log10_bf = np.log10(bayes_factor.detach().cpu().numpy())
+    log_fc_np = guide.locs.log_fc.detach().cpu().numpy()
+    
+    if make_plot:
+        fig, ax = plot_volcano(log_fc_np, log10_bf, float(cutoff))  # Convert to float
+        return log10_bf, log_fc_np, fig, ax
+    
+    return log10_bf, log_fc_np
+
+
+def plot_volcano(log_fc_np, log10_bf, cutoff, bf_threshold=1.0):
+    """Create a publication-quality volcano plot for differential expression analysis."""
+    
+    # Classify genes
+    upregulated = (log_fc_np > cutoff) & (log10_bf > bf_threshold)
+    downregulated = (log_fc_np < -cutoff) & (log10_bf > bf_threshold)
+    not_significant = ~(upregulated | downregulated)
+    
+    fig, ax = plt.subplots(figsize=(10, 8), dpi=300)
+    
+    # Plot points
+    ax.scatter(log_fc_np[not_significant], log10_bf[not_significant], c='#BDBDBD', 
+               s=50, alpha=0.4, edgecolors='none', label=f'NS (n={not_significant.sum()})', rasterized=True)
+    ax.scatter(log_fc_np[downregulated], log10_bf[downregulated], c='#2E86DE', 
+               s=60, alpha=0.8, edgecolors='none', label=f'Down (n={downregulated.sum()})', rasterized=True)
+    ax.scatter(log_fc_np[upregulated], log10_bf[upregulated], c='#EE5A6F', 
+               s=60, alpha=0.8, edgecolors='none', label=f'Up (n={upregulated.sum()})', rasterized=True)
+    
+    # Threshold lines
+    ax.axhline(y=bf_threshold, color='#757575', linestyle='--', linewidth=2, alpha=0.7, zorder=0)
+    ax.axvline(x=cutoff, color='#757575', linestyle='--', linewidth=2, alpha=0.7, zorder=0)
+    ax.axvline(x=-cutoff, color='#757575', linestyle='--', linewidth=2, alpha=0.7, zorder=0)
+    
+    # Styling with better fonts
+    ax.set_xlabel('Log2 Fold Change', fontsize=28, fontweight='normal', family='sans-serif')
+    ax.set_ylabel('Log10 Bayes Factor', fontsize=28, fontweight='normal', family='sans-serif')
+    ax.set_title('Differential Expression Analysis', fontsize=32, fontweight='bold', 
+                 family='sans-serif', pad=20)
+    
+    # Limits
+    x_max = np.max(np.abs(log_fc_np)) * 1.1
+    log10_bf_finite = log10_bf[np.isfinite(log10_bf)]
+    y_max = np.max(log10_bf_finite) * 1.1 if len(log10_bf_finite) > 0 else 3.0
+    ax.set_xlim(-x_max, x_max)
+    ax.set_ylim(-0.3, max(y_max, 2.5))
+    
+    # Clean styling
+    ax.set_facecolor('white')
+    fig.patch.set_facecolor('white')
+    ax.set_axisbelow(True)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_linewidth(2)
+    ax.spines['bottom'].set_linewidth(2)
+    ax.tick_params(axis='both', which='major', labelsize=22, width=2, length=6)
+    
+    # Better legend
+    ax.legend(loc='upper left', framealpha=1.0, fontsize=20, frameon=True, 
+              edgecolor='black', fancybox=False, shadow=False)
+    
+    plt.tight_layout()
+    
+    return fig, ax
