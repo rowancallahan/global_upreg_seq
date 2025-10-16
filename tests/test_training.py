@@ -30,9 +30,10 @@ def test_generate_simulated_data_distributions(dist_type):
     "zero_inflated_poisson"
 ])
 def test_full_pipeline(dist_type, group_size=15, training_amount=50):
-    counts, labels = generate_simulated_data(group_size,
+    counts, labels, _ = generate_simulated_data(group_size,
                                              gene_size=100,
                                              distribution_type=dist_type)
+                        
 
     model = factor_model_poisson() 
     model, guide, (losses, logp) = train(counts,labels,model,num_iterations=training_amount)
