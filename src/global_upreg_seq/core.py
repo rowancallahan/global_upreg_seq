@@ -19,7 +19,8 @@ def generate_simulated_data(group_size,
                             median_log_upreg = 0.7,
                             downreg_fraction = -0.66,
                             zero_inflation = 0.2,
-                            overdispersion_factor = 0.2,
+                            a_0= 0.01,
+                            a_1 = 5,
                             log_base_mean_val = 5):
 
 
@@ -42,25 +43,33 @@ def generate_simulated_data(group_size,
         upreg_dist = dist.ZeroInflatedPoisson(torch.exp(log_base_means+log_fc), gate= constant_gate)
 
     elif distribution_type == "negative_binomial":
-        constant_gate = torch.rand(gene_size)*zero_inflation
-        overdisperse = torch.rand(gene_size)*overdispersion_factor
+        constant_gate = torch.rand(gene_size)* torch.tensor(0.0)
+        
+        base_mean = torch.exp(log_base_means)
+        overdispersion = base_mean * (1+ a_1 +a_0*base_mean+torch.randn(gene_size))
+        base_dist = zinb_reparam(base_mean,
+                                overdispersion,
+                                constant_gate)
 
-        base_dist = zinb_reparam(torch.exp(log_base_means),
-                                 torch.exp(log_base_means+overdisperse),
-                                 constant_gate)
-        upreg_dist= zinb_reparam(torch.exp(log_base_means+log_fc),
-                                 torch.exp(log_base_means+log_fc+overdisperse),
-                                 constant_gate)
+        upreg_mean = torch.exp(log_base_means + log_fc)
+        overdispersion_upreg = upreg_mean * (1+ a_1 +a_0*upreg_mean +torch.randn(gene_size))
+        upreg_dist= zinb_reparam(upreg_mean,
+                                overdispersion_upreg,     
+                                constant_gate)
     elif distribution_type == "zinb":
         constant_gate = torch.rand(gene_size)*zero_inflation
-        overdisperse = torch.rand(gene_size)*overdispersion_factor
 
-        base_dist = zinb_reparam(torch.exp(log_base_means),
-                                 torch.exp(log_base_means+overdisperse),
-                                 constant_gate)
-        upreg_dist= zinb_reparam(torch.exp(log_base_means+log_fc),
-                                 torch.exp(log_base_means+log_fc+overdisperse),
-                                 constant_gate)
+        base_mean = torch.exp(log_base_means)
+        overdispersion = base_mean * (1+ a_1 +a_0*base_mean + torch.randn(gene_size))
+        base_dist = zinb_reparam(base_mean,
+                                overdispersion,
+                                constant_gate)
+
+        upreg_mean = torch.exp(log_base_means + log_fc)
+        overdispersion_upreg = upreg_mean * (1+ a_1 +a_0*upreg_mean+torch.randn(gene_size))
+        upreg_dist= zinb_reparam(upreg_mean,
+                                overdispersion_upreg,     
+                                constant_gate)
     
     #now take samples from normal means and upreg mans
     base_samples = base_dist.sample((group_size,))

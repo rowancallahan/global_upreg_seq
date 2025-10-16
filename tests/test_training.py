@@ -12,7 +12,7 @@ from src.global_upreg_seq.models import factor_model_poisson
     "zero_inflated_poisson"
 ])
 def test_generate_simulated_data_distributions(dist_type):
-    counts, labels = generate_simulated_data(
+    counts, labels, _ = generate_simulated_data(
         5,
         gene_size=100,
         distribution_type=dist_type,
