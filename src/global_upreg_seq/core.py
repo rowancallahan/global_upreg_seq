@@ -23,6 +23,36 @@ def generate_simulated_data(group_size,
                             a_1 = 5,
                             log_base_mean_val = 5):
 
+    """Generate simulated RNA-seq count data with differential expression.
+
+    Parameters
+    ----------
+    group_size : int
+        Number of samples per condition (base and upregulated).
+    gene_size : int, default=40000
+        Number of genes to simulate.
+    distribution_type : str, default="negative_binomial"
+        Distribution type: "poisson", "zero_inflated_poisson", "negative_binomial", or "zinb".
+    median_log_upreg : float, default=0.7
+        Median log fold change for upregulated genes (natural log scale).
+    downreg_fraction : float, default=-0.66
+        Fraction threshold for differentially expressed genes (negative selects upregulated genes).
+    zero_inflation : float, default=0.2
+        Zero inflation parameter for ZIP and ZINB distributions.
+    a_0 : float, default=0.01
+        Overdispersion scaling parameter (mean-dependent component).
+    a_1 : float, default=5
+        Overdispersion baseline parameter.
+    log_base_mean_val : float, default=5
+        Scale parameter for gene expression base means (natural log scale).
+
+    Returns
+    -------
+    tuple
+        - counts_observed (torch.Tensor): Shape (2*group_size, gene_size) count matrix.
+        - labels (torch.Tensor): Shape (2*group_size,) condition labels (0=base, 1=upreg).
+        - (log_fc, size_factors, log_base_means): Ground truth parameters.
+    """
 
     group_size=group_size
     

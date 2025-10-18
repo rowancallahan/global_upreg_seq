@@ -57,6 +57,56 @@ class factor_model_poisson(PyroModule):
                 mu = torch.exp(log_mu+log_size_factor).clamp(min=1e-30, max=1e30)
                 pyro.sample("obs", dist.Poisson(mu), obs=x)
 
+class factor_model_nb(PyroModule):
+    def forward(self, x, y, classnum=2):
+        N, P = x.shape
+
+        loading_plate = pyro.plate("loading_plate", P, dim=-1)
+        factor_plate = pyro.plate("factor_plate", classnum-1, dim=-2)
+        
+        alpha_1 = pyro.sample("alpha_1", dist.HalfNormal(5))
+        #put alpha 0 here make it a prior and test it globally
+        with loading_plate:
+            log_mu0 = pyro.sample("log_mu0", dist.Normal(0,15))
+            alpha_0_inv = pyro.sample("alpha_0", dist.HalfNormal(5))
+
+        with factor_plate:
+            global_upreg_true = pyro.sample("global_upreg_true", dist.Bernoulli(0.5), infer={"enumerate": "parallel"})
+            global_upreg_value = pyro.sample("global_upreg_value", dist.Normal(0, 5.0))
+            global_upreg = pyro.deterministic("global_upreg", global_upreg_value * global_upreg_true)
+            tau_g = pyro.sample("tau_g", dist.HalfCauchy(1.))
+
+            with loading_plate:
+                tau_l = pyro.sample("tau_l", dist.HalfCauchy(1.))
+                log_fc = pyro.sample("log_fc", dist.Normal(global_upreg, 1.0 * tau_g * tau_l))
+
+
+        with pyro.plate("data", N, dim=-2):
+            log_size_factor = pyro.sample("log_size_factor", dist.Normal(0, 5.0))
+
+
+            mask_0 = (y == 0)
+            mask_1 = (y == 1)
+            mean_0 = log_size_factor[mask_0].mean() if mask_0.any() else torch.tensor(0.)
+            mean_1 = log_size_factor[mask_1].mean() if mask_1.any() else torch.tensor(0.)
+
+            mean_diff = pyro.deterministic("mean_diff", mean_1 - mean_0)
+            pyro.factor("size_factor_diff_penalty",
+                dist.Normal(0., 0.001/torch.sqrt(torch.tensor(N))).log_prob(mean_diff))
+
+            with loading_plate:
+                log_mu = log_mu0 + (log_fc.unsqueeze(0) * y.unsqueeze(-1))
+                log_mu = log_mu.squeeze()
+                log_mu = torch.clamp(log_mu, min=-10, max=20)
+                alpha_inv = pyro.deterministic("alpha_inv",  1/((alpha_1/(torch.exp(log_mu)+1)) +1/alpha_0_inv)).clamp(min=1e-6,max=1e6)
+
+                logits = torch.clamp(log_mu + log_size_factor - torch.log(alpha_inv), min=-20, max=20)
+                #mu = torch.exp((log_mu + log_size_factor).clamp(min=-20, max=20))
+                #logits = log_mu +log_size_factor -torch.log(alpha_inv)
+
+                pyro.sample("obs", dist.NegativeBinomial(total_count=alpha_inv, logits=logits), obs=x)
+
+
 class factor_model_onehot_mixedeffect(PyroModule):
     def forward(self, x, y, random_factor=0):
         N, P = x.shape
