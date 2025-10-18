@@ -2,7 +2,7 @@
 import pytest
 import torch
 from src.global_upreg_seq.core import generate_simulated_data, train
-from src.global_upreg_seq.models import factor_model_poisson 
+from src.global_upreg_seq.models import factor_model_poisson, factor_model_nb
 
 
 @pytest.mark.parametrize("dist_type", [
@@ -29,13 +29,16 @@ def test_generate_simulated_data_distributions(dist_type):
     "zinb",
     "zero_inflated_poisson"
 ])
-def test_full_pipeline(dist_type, group_size=15, training_amount=50):
+@pytest.mark.parametrize("model", [
+    factor_model_poisson(),
+    factor_model_nb(),
+])
+def test_full_pipeline(dist_type,model, group_size=15, training_amount=50):
     counts, labels, _ = generate_simulated_data(group_size,
                                              gene_size=100,
                                              distribution_type=dist_type)
                         
 
-    model = factor_model_poisson() 
     model, guide, (losses, logp) = train(counts,labels,model,num_iterations=training_amount)
     assert len(losses) == training_amount
     
