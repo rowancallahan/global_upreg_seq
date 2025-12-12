@@ -4,14 +4,38 @@ from tqdm import tqdm
 import pyro
 import pyro.distributions as dist
 from pyro.infer import Predictive, SVI, Trace_ELBO, TraceMeanField_ELBO, Importance, TraceEnum_ELBO
-from pyro.infer.autoguide import AutoNormal, AutoDelta
+from pyro.infer.autoguide import AutoDiagonalNormal, AutoNormal, AutoDelta
 from pyro.optim import Adam, ClippedAdam
 
 import pyro.poutine as poutine
-from .models import base_guide
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+def nb_reparam(mean, alpha, eps=1e-6):
+    """
+    probability here is flipped compared to wikipedia probability
+    here am translating wikipedia nomenclature to pyro
+    probs is actually the probability of failure actually
+    total_counts= r
+    probs = 1-p
+    mean counts = (r *(1-p))/p)
+    translating this into the pyro
+    we get: mean counts = ((total_counts * probs)/( 1-probs)
+
+    """
+    mean = torch.tensor(mean, dtype=torch.float)
+    alpha = torch.tensor(alpha, dtype=torch.float)
+    alpha_inv = 1.0/alpha
+    logits = torch.log(mean) + torch.log(alpha) 
+
+    # Create ZINB distribution
+    zinb = dist.NegativeBinomial(
+        total_count=alpha_inv,
+        logits=logits
+    )
+    
+    return zinb
 
 def generate_simulated_data(group_size,
                             gene_size=40000,
@@ -65,17 +89,14 @@ def generate_simulated_data(group_size,
         upreg_dist = dist.Poisson(torch.exp(log_base_means+log_fc))
 
     elif distribution_type == "negative_binomial":
-        constant_gate = torch.rand(gene_size)* torch.tensor(0.0)
-        
         base_mean = torch.exp(log_base_means)
-        overdispersion = (a_1/base_mean +a_0) * torch.randn(gene_size)
+        overdispersion = (a_1/base_mean +a_0) * torch.log(0.5*torch.randn(gene_size))
         base_dist = nb_reparam(base_mean,
                                 overdispersion)
 
         upreg_mean = torch.exp(log_base_means + log_fc)
-        overdispersion_upreg =  (a_1/upreg_mean +a_0) * torch.randn(gene_size)
         upreg_dist= nb_reparam(upreg_mean,
-                                overdispersion_upreg)
+                                overdispersion)
     
     #now take samples from normal means and upreg mans
     base_samples = base_dist.sample((group_size,))
@@ -90,33 +111,6 @@ def generate_simulated_data(group_size,
     counts_observed= (combined_samples * size_factors.unsqueeze(-1)).round()
 
     return (counts_observed, labels, (log_fc, size_factors, log_base_means))
-
-
-
-def nb_reparam(mean, alpha, eps=1e-6):
-    """
-    probability here is flipped compared to wikipedia probability
-    here am translating wikipedia nomenclature to pyro
-    probs is actually the probability of failure actually
-    total_counts= r
-    probs = 1-p
-    mean counts = (r *(1-p))/p)
-    translating this into the pyro
-    we get: mean counts = ((total_counts * probs)/( 1-probs)
-
-    """
-    mean = torch.tensor(mean, dtype=torch.float)
-    alpha = torch.tensor(alpha, dtype=torch.float)
-    alpha_inv = 1.0/alpha
-    logit = torch.log(mean) + torch.log(alpha) 
-
-    # Create ZINB distribution
-    zinb = dist.NegativeBinomial(
-        total_count=alpha_inv,
-        logit=logit
-    )
-    
-    return zinb
 
 
 def prepare_initialization(counts_observed, labels, zero_inflated=False, group_size=None):
@@ -160,9 +154,7 @@ def train(data,
     if optim is None:
         optim=  ClippedAdam({"lr": 0.1, "clip_norm": 100.0, "lrd":0.0005**(1/num_iterations)})
     if guide is None:
-        initial_sf, log_mean_start = prepare_initialization(data, labels= labels)
-
-        guide = base_guide(model, initial_sf, log_mean_start)
+        guide = AutoDiagonalNormal(model)
 
     #SVI TO OPTIMIZE HERE
     svi = SVI(model,guide,optim,
