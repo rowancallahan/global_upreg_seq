@@ -18,7 +18,6 @@ def generate_simulated_data(group_size,
                             distribution_type="negative_binomial",
                             median_log_upreg = 0.7,
                             downreg_fraction = -0.66,
-                            zero_inflation = 0.2,
                             a_0= 0.01,
                             a_1 = 5,
                             log_base_mean_val = 5):
@@ -37,8 +36,6 @@ def generate_simulated_data(group_size,
         Median log fold change for upregulated genes (natural log scale).
     downreg_fraction : float, default=-0.66
         Fraction threshold for differentially expressed genes (negative selects upregulated genes).
-    zero_inflation : float, default=0.2
-        Zero inflation parameter for ZIP and ZINB distributions.
     a_0 : float, default=0.01
         Overdispersion scaling parameter (mean-dependent component).
     a_1 : float, default=5
@@ -55,7 +52,6 @@ def generate_simulated_data(group_size,
     """
 
     group_size=group_size
-    
     log_base_means = torch.abs(torch.randn(gene_size) * log_base_mean_val)-2
     log_fc = torch.tensor([ sample if test >= downreg_fraction else 0
                            for test,sample in
@@ -67,39 +63,19 @@ def generate_simulated_data(group_size,
         #create a base distribution and upregulated one
         base_dist = dist.Poisson(torch.exp(log_base_means))
         upreg_dist = dist.Poisson(torch.exp(log_base_means+log_fc))
-    elif distribution_type == "zero_inflated_poisson":  
-        constant_gate = torch.rand(gene_size)*zero_inflation
-        base_dist = dist.ZeroInflatedPoisson(torch.exp(log_base_means), gate = constant_gate)
-        upreg_dist = dist.ZeroInflatedPoisson(torch.exp(log_base_means+log_fc), gate= constant_gate)
 
     elif distribution_type == "negative_binomial":
         constant_gate = torch.rand(gene_size)* torch.tensor(0.0)
         
         base_mean = torch.exp(log_base_means)
-        overdispersion = base_mean * (1+ a_1 +a_0*base_mean+torch.randn(gene_size))
-        base_dist = zinb_reparam(base_mean,
-                                overdispersion,
-                                constant_gate)
+        overdispersion = (a_1/base_mean +a_0) * torch.randn(gene_size)
+        base_dist = nb_reparam(base_mean,
+                                overdispersion)
 
         upreg_mean = torch.exp(log_base_means + log_fc)
-        overdispersion_upreg = upreg_mean * (1+ a_1 +a_0*upreg_mean +torch.randn(gene_size))
-        upreg_dist= zinb_reparam(upreg_mean,
-                                overdispersion_upreg,     
-                                constant_gate)
-    elif distribution_type == "zinb":
-        constant_gate = torch.rand(gene_size)*zero_inflation
-
-        base_mean = torch.exp(log_base_means)
-        overdispersion = base_mean * (1+ a_1 +a_0*base_mean + torch.randn(gene_size))
-        base_dist = zinb_reparam(base_mean,
-                                overdispersion,
-                                constant_gate)
-
-        upreg_mean = torch.exp(log_base_means + log_fc)
-        overdispersion_upreg = upreg_mean * (1+ a_1 +a_0*upreg_mean+torch.randn(gene_size))
-        upreg_dist= zinb_reparam(upreg_mean,
-                                overdispersion_upreg,     
-                                constant_gate)
+        overdispersion_upreg =  (a_1/upreg_mean +a_0) * torch.randn(gene_size)
+        upreg_dist= nb_reparam(upreg_mean,
+                                overdispersion_upreg)
     
     #now take samples from normal means and upreg mans
     base_samples = base_dist.sample((group_size,))
@@ -117,7 +93,7 @@ def generate_simulated_data(group_size,
 
 
 
-def zinb_reparam(mean, variance, zero_inflation, eps=1e-6):
+def nb_reparam(mean, alpha, eps=1e-6):
     """
     probability here is flipped compared to wikipedia probability
     here am translating wikipedia nomenclature to pyro
@@ -130,23 +106,14 @@ def zinb_reparam(mean, variance, zero_inflation, eps=1e-6):
 
     """
     mean = torch.tensor(mean, dtype=torch.float)
-    variance = torch.tensor(variance, dtype=torch.float)
-    zero_inflation = torch.tensor(zero_inflation, dtype=torch.float)
+    alpha = torch.tensor(alpha, dtype=torch.float)
+    alpha_inv = 1.0/alpha
+    logit = torch.log(mean) + torch.log(alpha) 
 
-    # Assert variance is at least equal to mean
-    assert torch.all(variance >= mean), f"Variance must be >= mean, but got min ratio: {(variance/mean).min()}"
-    variance = torch.where(variance == mean, mean + eps, variance)
-    
-    # Calculate ZINB parameters
-    total_count = torch.square(mean)/ (variance-mean) #r = mu^2/(sigma^2-mu)
-    probability = mean/variance #p = mu/(sigma^2)
-    probs = torch.clamp((1 - probability), 0+eps,1-eps) # success probability for Pyro
-    
     # Create ZINB distribution
-    zinb = dist.ZeroInflatedNegativeBinomial(
-        gate=zero_inflation,
-        total_count=total_count,
-        probs=probs
+    zinb = dist.NegativeBinomial(
+        total_count=alpha_inv,
+        logit=logit
     )
     
     return zinb
@@ -199,7 +166,7 @@ def train(data,
 
     #SVI TO OPTIMIZE HERE
     svi = SVI(model,guide,optim,
-    loss=TraceEnum_ELBO(max_plate_nesting=2) if loss is None else loss)
+    loss=Trace_ELBO(max_plate_nesting=2) if loss is None else loss)
     
     #MAIN TRAINING LOOP HERE
     pbar = tqdm(range(num_iterations))
@@ -208,11 +175,7 @@ def train(data,
         loss = svi.step(data,y=labels)
         if j %50 == 0:
             pbar_loss = loss
-            with torch.no_grad():
-                trace = poutine.trace(model).get_trace(data, labels)
-                trace.compute_log_prob()
-                logp_size = trace.nodes["log_size_factor"]["log_prob_sum"].item()
-                logp_size_hist.append(logp_size)
+
             
         pbar.set_description(f"Loss: {pbar_loss:.3e}")
         losses.append(loss)
@@ -220,16 +183,20 @@ def train(data,
     return(model, guide, (losses, logp_size_hist))
 
 
-def calculate_foldchange_bf(guide, cutoff, make_plot=True):
+def calculate_foldchange_bf(guide, cutoff, make_plot=True, non_bf=False):
     log_fc_loc = torch.abs(guide.locs.log_fc.detach())
     log_fc_scale = guide.scales.log_fc
     cutoff = torch.tensor(cutoff)
     dist = torch.distributions.Normal(loc=log_fc_loc, scale=log_fc_scale)
     
-    bayes_factor = (1 - dist.cdf(cutoff)) / dist.cdf(cutoff)
+    bayes_factor = ((1 - dist.cdf(cutoff)) / dist.cdf(cutoff)).clamp(min=1e-37)
     log10_bf = np.log10(bayes_factor.detach().cpu().numpy())
     log_fc_np = guide.locs.log_fc.detach().cpu().numpy()
-    
+
+    if non_bf:
+        likelihood_less= (dist.cdf(cutoff)).clamp(min=1e-37)
+        log10_bf = -np.log10(likelihood_less.detach().cpu().numpy())
+
     if make_plot:
         fig, ax = plot_volcano(log_fc_np, log10_bf, float(cutoff))  # Convert to float
         return log10_bf, log_fc_np, fig, ax
