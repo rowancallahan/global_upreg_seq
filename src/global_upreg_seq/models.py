@@ -17,7 +17,7 @@ from pyro.nn import PyroModule
 from pyro.nn import PyroSample
 from pyro.ops import einsum
 
-class factor_model_nb_nosf(PyroModule):
+class factor_model_nb(PyroModule):
     def forward(self, x, y, classnum=2):
         N, P = x.shape
 
@@ -68,17 +68,4 @@ class factor_model_nb_nosf(PyroModule):
                     print(f"Inf detected: logits range [{logits.min()}, {logits.max()}]")
                     print(f"alpha_inv range [{alpha_inv.min()}, {alpha_inv.max()}]")
                 pyro.sample("obs", dist.NegativeBinomial(total_count=alpha_inv, logits=logits), obs=x)
-
-
-
-def base_guide(model, initial_size_factors, log_mu0_start):
-
-    guide = AutoNormal(
-        poutine.block(model, hide=['global_upreg_true']),
-        init_loc_fn=init_to_value(values={"log_size_factor": initial_size_factors.unsqueeze(-1),
-                                         "log_mu0": log_mu0_start.unsqueeze(0) })
-    )
-    
-    return(guide)
-
 
