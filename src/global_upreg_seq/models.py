@@ -29,15 +29,15 @@ class factor_model_nb_nosf(PyroModule):
             log_mu0= pyro.sample("log_mu0", dist.Normal(0,10))
 
             alpha_gene = pyro.sample("alpha_gene", dist.LogNormal(-1,2.0))
+
+        midpoint = pyro.sample("uninformative_cutoff", dist.Normal(0,1))
+        gate_scale = pyro.sample("uninformative_scale", dist.LogNormal(0,1))
         with factor_plate:
             #tau_g = pyro.sample("tau_g", dist.HalfCauchy(3.0))
             tau_g = pyro.sample("tau_g", dist.HalfNormal(3.0))
-
             with loading_plate:
                 eps = torch.tensor(5e-2)
-                midpoint = torch.log(torch.tensor(5.0))
-                size_gate = torch.sigmoid((log_mu0 - midpoint ) / 0.5)
-
+                size_gate = torch.sigmoid((log_mu0 - midpoint ) / gate_scale)
                 #tau_l = pyro.sample("tau_l", dist.HalfCauchy(3.0))
                 tau_l = pyro.sample("tau_l", dist.HalfNormal(3.0))
                 log_fc = pyro.sample("log_fc", dist.Normal(0, eps +(size_gate * tau_g * tau_l) ))
