@@ -129,11 +129,13 @@ def jax_prepare_norm_mode(counts, labels):
 
     log_mu0 = jnp.mean(true_counts[base_mask],  axis=0)
     log_fc  = jnp.mean(true_counts[upreg_mask], axis=0) - log_mu0
+    variance = jnp.var(jnp.exp(true_counts[base_mask]), axis=0)
+    alpha_est = (variance-jnp.exp(log_mu0))/jnp.square(jnp.exp(log_mu0))
 
-    return log_fc, log_mu0, sf_est
+    return log_fc, log_mu0, sf_est, alpha_est
 
 
-def jax_run_pyro(counts, labels, key, cutoff=np.log(2.0), iterations=3000, device="cpu", use_size_factor_model=True):
+def jax_run_pyro(counts, labels, key, cutoff=np.log(2.0), iterations=3000, device="cpu", use_size_factor_model=True, use_mode_norm=True):
     """Train NumPyro model. Drop-in replacement for run_pyro from core.py.
 
     Parameters
@@ -163,25 +165,38 @@ def jax_run_pyro(counts, labels, key, cutoff=np.log(2.0), iterations=3000, devic
 
     assert N > 0 and P > 0 and F > 0
     
+    #initialize model object
+    model = None
+    #initialize the values
     log_fc_init = None
     log_mu0 = None
-    s = jnp.zeros(N)
-    model= None
+    alpha_est = jnp.ones(P)
 
-    if not use_size_factor_model:
+    s = jnp.ones(N)
+    
+    #make the mode norm be set
+    if use_mode_norm:
+        log_fc_init, log_mu0, s, alpha_est = jax_prepare_norm_mode(y, jnp.array(labels))
+    else:
         log_fc_init, log_mu0 = jax_prepare_initialization(y, jnp.array(labels))
+    
+    #make the model be set
+    if not use_size_factor_model:
         model = jax_glob_seq_model_nosf
     elif use_size_factor_model:
-        log_fc_init, log_mu0, s = jax_prepare_norm_mode(y, jnp.array(labels))
+        #set things to zero to make sf stable and force it to "jump" out
+        #this will allow us to be conservative in finding true values
         log_fc_init = jnp.zeros_like(log_fc_init)
         model = jax_glob_seq_model
 
     init_vals = {
         "log_mu0": log_mu0,
-        "alpha":   jnp.ones(P),
-        "s":       s,
-        "pi":      jnp.full((F,), 0.5),
+        "alpha":   alpha_est,
         "log_fc":  log_fc_init[None, :],        # [F, P]
+        #after this we get sample specific, will ignore if not found in model
+        "s":       s,
+        "sample_alpha": jnp.square(s),
+        "pi":      jnp.full((F,), 0.5),
     }
 
     guide     = AutoNormal(model,
@@ -216,10 +231,9 @@ def jax_run_pyro(counts, labels, key, cutoff=np.log(2.0), iterations=3000, devic
     posterior  = dist.Normal(jnp.abs(log_fc_loc), log_fc_scale)
     p_lesser   = posterior.cdf(cutoff_val)
 
-    log10_p   = np.log10(np.array(p_lesser).clip(min=1e-37))
     log_fc_np = np.array(log_fc_loc).squeeze()  # [P]
 
     return {
         "log2fc":      log_fc_np / np.log(2.0),
-        "significant": (log10_p.squeeze() < -0.8),
+        "plesser": np.array(p_lesser),
     }, losses, result
