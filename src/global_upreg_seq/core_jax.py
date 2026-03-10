@@ -130,7 +130,8 @@ def jax_prepare_norm_mode(counts, labels):
     log_mu0 = jnp.mean(true_counts[base_mask],  axis=0)
     log_fc  = jnp.mean(true_counts[upreg_mask], axis=0) - log_mu0
     variance = jnp.var(jnp.exp(true_counts[base_mask]), axis=0)
-    alpha_est = (variance-jnp.exp(log_mu0))/jnp.square(jnp.exp(log_mu0))
+    #alpha_est = (variance-jnp.exp(log_mu0))/jnp.square(jnp.exp(log_mu0))
+    alpha_est = jnp.clip((variance - jnp.exp(log_mu0)) / jnp.square(jnp.exp(log_mu0)), 0.0001, 15.0)
 
     return log_fc, log_mu0, sf_est, alpha_est
 
@@ -195,7 +196,7 @@ def jax_run_pyro(counts, labels, key, cutoff=np.log(2.0), iterations=3000, devic
         "log_fc":  log_fc_init[None, :],        # [F, P]
         #after this we get sample specific, will ignore if not found in model
         "s":       s,
-        "sample_alpha": jnp.square(s),
+        "sample_alpha": jnp.square(s)[:, None],
         "pi":      jnp.full((F,), 0.5),
     }
 
@@ -235,5 +236,5 @@ def jax_run_pyro(counts, labels, key, cutoff=np.log(2.0), iterations=3000, devic
 
     return {
         "log2fc":      log_fc_np / np.log(2.0),
-        "plesser": np.array(p_lesser),
+        "plesser": np.array(p_lesser).squeeze(),
     }, losses, result
