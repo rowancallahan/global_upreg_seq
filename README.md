@@ -72,6 +72,63 @@ print(f"Stably expressed genes: {len(stable_genes)}")
 
 Unlike frequentist methods that can only fail to reject the null, `plesser` directly quantifies the probability that a gene's fold change is small — giving positive evidence for stability.
 
+### Using Design Matrices
+
+GlobSeq supports arbitrary design matrices, not just two-group comparisons. The `labels` argument is actually a design matrix `x` of shape `[N, F]` where F is the number of factors. When you pass a 1D array of 0s and 1s, it's automatically reshaped to `[N, 1]`.
+
+For multi-factor designs, build your design matrix with [patsy](https://patsy.readthedocs.io/) or [formulaic](https://matthewwardrop.github.io/formulaic/):
+
+```python
+import pandas as pd
+import numpy as np
+from formulaic import model_matrix  # pip install formulaic
+
+# Sample metadata
+metadata = pd.DataFrame({
+    "condition": ["ctrl", "ctrl", "ctrl", "treat", "treat", "treat",
+                  "ctrl", "ctrl", "ctrl", "treat", "treat", "treat"],
+    "batch":     ["A", "A", "A", "A", "A", "A",
+                  "B", "B", "B", "B", "B", "B"],
+})
+
+# Two-group (simple case) — same as passing labels directly
+X_simple = model_matrix("~ condition", metadata)
+# Drops intercept since GlobSeq has its own (log_mu0)
+X = np.array(X_simple)[:, 1:]  # keep only the condition column, shape [12, 1]
+
+# Multi-factor: condition + batch effect
+X_multi = model_matrix("~ condition + batch", metadata)
+X = np.array(X_multi)[:, 1:]  # drop intercept, shape [12, 2]
+# Column 0 = condition effect, Column 1 = batch effect
+```
+
+Then pass the design matrix directly:
+
+```python
+results, losses, svi = jax_run_pyro(
+    counts.values.T,  # [N, P]
+    X,                 # [N, F] design matrix
+    key,
+    iterations=3000,
+)
+
+# results["log2fc"] is now [F, P] — one fold-change per factor per gene
+# results["plesser"] is [F, P] — significance per factor per gene
+# Column 0 = condition effect, Column 1 = batch effect
+```
+
+**With patsy** (alternative to formulaic):
+
+```python
+import patsy
+
+# Build design matrix from formula
+X = patsy.dmatrix("~ condition + batch", metadata, return_type="dataframe")
+X = np.array(X)[:, 1:]  # drop intercept
+```
+
+**Important:** Always drop the intercept column from the design matrix — GlobSeq models its own intercept via `log_mu0`. The remaining columns correspond to the factors in `log_fc [F, P]`, so the first factor's results are in `results["log2fc"][0, :]` and `results["plesser"][0, :]`.
+
 ### Model Variants
 
 ```python
