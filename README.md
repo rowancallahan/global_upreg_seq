@@ -132,10 +132,12 @@ X = np.array(X)[:, 1:]  # drop intercept
 ### Model Variants
 
 ```python
-# With size factor estimation (default) — use when normalization bias is expected
+# With size factor estimation (default) — for small datasets where its possible you
+# may have a very large bias in sample handling or processing between conditions
 results, losses, svi = jax_run_pyro(counts.T, labels, key, use_size_factor_model=True)
 
-# Without size factors — use when data is already normalized or bias is minimal
+# Without size factors — useful when you have a lot of data to make training more
+# stable, with a more flexible representation of the data
 results, losses, svi = jax_run_pyro(counts.T, labels, key, use_size_factor_model=False)
 ```
 
