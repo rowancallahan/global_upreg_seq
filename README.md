@@ -53,7 +53,7 @@ de_results["stable"] = de_results["plesser"] > 0.95  # >95% probability of no ch
 
 ## Design Matrices
 
-GlobSeq accepts arbitrary design matrices `[N, F]`. A 1D label array is reshaped to `[N, 1]` automatically.
+GlobSeq accepts arbitrary design matrices `[N, F]`. A 1D label array is reshaped to `[N, 1]` automatically. For categorical variables, use one-hot encoding with K−1 columns (drop one category as the reference). Libraries like `formulaic` or `patsy` handle this automatically with formula syntax.
 
 ```python
 from formulaic import model_matrix  # pip install formulaic
@@ -139,6 +139,13 @@ counts, labels, (log_fc_true, size_factors, base_means) = jax_generate_simulated
     non_de_fraction=0.25, seed=42,
 )
 ```
+
+## Differences from DESeq2 and Other Methods
+
+- **Minimal filtering:** Only filter genes with fewer than 10 total counts across all samples. Unlike DESeq2, GlobSeq does not use geometric means for normalization, so genes with zero counts in some samples are handled naturally — no need for the strict filtering that DESeq2 requires to avoid undefined geometric means.
+- **No normalization step:** GlobSeq estimates size factors and fold changes jointly within the model, rather than as a separate preprocessing step. This avoids the circular dependency where normalization assumes most genes are not DE.
+- **Direct posterior inference:** Instead of p-values from a frequentist test, GlobSeq returns `plesser` — the posterior probability that a gene's fold change is small. This means you can make positive claims about non-DE genes (high `plesser`), not just fail to reject the null.
+- **Robust to global upregulation:** When a large fraction of genes are DE in the same direction, median-of-ratios normalization (DESeq2, edgeR) systematically underestimates fold changes. GlobSeq's spike-and-slab prior separates DE from non-DE genes during inference, avoiding this bias.
 
 ## Platform
 
