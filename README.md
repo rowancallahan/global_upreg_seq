@@ -53,6 +53,8 @@ de_results["stable"] = de_results["plesser"] > 0.95  # >95% probability of no ch
 
 ## Design Matrices
 
+> 🚧 **!! Multi-factor design matrices (F > 1) are not fully supported yet !!** The model architecture handles arbitrary `[N, F]` matrices, but the data-driven initialization assumes binary labels and will produce incorrect starting values for F > 1. Binary two-group comparisons (F = 1) work correctly. See [Roadmap](#roadmap) for details.
+
 GlobSeq accepts arbitrary design matrices `[N, F]`. A 1D label array is reshaped to `[N, 1]` automatically. For categorical variables, use one-hot encoding with K−1 columns (drop one category as the reference). Libraries like `formulaic` or `patsy` handle this automatically with formula syntax.
 
 ```python
