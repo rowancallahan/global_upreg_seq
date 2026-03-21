@@ -13,6 +13,25 @@ pip install "jax[cpu]==0.9.1" numpyro==0.20.0
 
 Requires Python ≥ 3.10. For GPU, use `jax[cuda12]` instead of `jax[cpu]`.
 
+## Model Variants
+
+```python
+# With size factor estimation (default) — for small datasets (< 35 samples per group)
+# where you may have large bias in sample handling or processing between conditions
+results, losses, svi = jax_run_pyro(counts.T, labels, key, use_size_factor_model=True)
+
+# Without size factors — recommended with 35–50+ samples per group, makes training
+# more stable with a more flexible representation of the data
+results, losses, svi = jax_run_pyro(counts.T, labels, key, use_size_factor_model=False)
+```
+
+## Differences from DESeq2 and Other Methods
+
+- **Minimal filtering:** Only filter genes with fewer than 10 total counts across all samples. Unlike DESeq2, GlobSeq does not use geometric means for normalization, so genes with zero counts in some samples are handled naturally — no need for the strict filtering that DESeq2 requires to avoid undefined geometric means.
+- **No normalization step:** GlobSeq estimates size factors and fold changes jointly within the model, rather than as a separate preprocessing step. This avoids the circular dependency where normalization assumes most genes are not DE.
+- **Direct posterior inference:** Instead of p-values from a frequentist test, GlobSeq returns `plesser` — the posterior probability that a gene's fold change is small. This means you can make positive claims about non-DE genes (high `plesser`), not just fail to reject the null.
+- **Robust to global upregulation:** When a large fraction of genes are DE in the same direction, median-of-ratios normalization (DESeq2, edgeR) systematically underestimates fold changes. GlobSeq's spike-and-slab prior separates DE from non-DE genes during inference, avoiding this bias.
+
 ## Quick Start
 
 ```python
@@ -109,18 +128,6 @@ for pair, plesser in pw.items():
     print(f"{pair[0]} vs {pair[1]}: {(plesser < 0.05).sum()} DE genes")
 ```
 
-## Model Variants
-
-```python
-# With size factor estimation (default) — for small datasets where you may have
-# large bias in sample handling or processing between conditions
-results, losses, svi = jax_run_pyro(counts.T, labels, key, use_size_factor_model=True)
-
-# Without size factors — useful when you have a lot of data to make training
-# more stable, with a more flexible representation of the data
-results, losses, svi = jax_run_pyro(counts.T, labels, key, use_size_factor_model=False)
-```
-
 ## Replicates
 
 Different random keys give independent inference runs:
@@ -141,13 +148,6 @@ counts, labels, (log_fc_true, size_factors, base_means) = jax_generate_simulated
     non_de_fraction=0.25, seed=42,
 )
 ```
-
-## Differences from DESeq2 and Other Methods
-
-- **Minimal filtering:** Only filter genes with fewer than 10 total counts across all samples. Unlike DESeq2, GlobSeq does not use geometric means for normalization, so genes with zero counts in some samples are handled naturally — no need for the strict filtering that DESeq2 requires to avoid undefined geometric means.
-- **No normalization step:** GlobSeq estimates size factors and fold changes jointly within the model, rather than as a separate preprocessing step. This avoids the circular dependency where normalization assumes most genes are not DE.
-- **Direct posterior inference:** Instead of p-values from a frequentist test, GlobSeq returns `plesser` — the posterior probability that a gene's fold change is small. This means you can make positive claims about non-DE genes (high `plesser`), not just fail to reject the null.
-- **Robust to global upregulation:** When a large fraction of genes are DE in the same direction, median-of-ratios normalization (DESeq2, edgeR) systematically underestimates fold changes. GlobSeq's spike-and-slab prior separates DE from non-DE genes during inference, avoiding this bias.
 
 ## Platform
 
