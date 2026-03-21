@@ -1,24 +1,19 @@
 # GlobSeq
 
-Bayesian differential expression analysis for RNA-seq data under global upregulation. GlobSeq uses a spike-and-slab prior to jointly estimate gene-level fold changes and sample-level size factors, avoiding the median-of-ratios normalization bias that affects standard methods (DESeq2, edgeR) when most genes are DE.
+Bayesian differential expression analysis for RNA-seq under global upregulation. Uses a spike-and-slab prior to jointly estimate fold changes and size factors, avoiding normalization bias when most genes are DE.
 
 ## Installation
 
 ```bash
-# Clone and install
 git clone https://github.com/rowancallahan/global_upreg_seq.git
 cd global_upreg_seq
 pip install -e .
-
-# For CPU-only (recommended for laptops)
 pip install "jax[cpu]==0.9.1" numpyro==0.20.0
 ```
 
-Requires Python ≥ 3.10. If you have GPU access, install `jax[cuda12]` instead of `jax[cpu]`.
+Requires Python ≥ 3.10. For GPU, use `jax[cuda12]` instead of `jax[cpu]`.
 
 ## Quick Start
-
-### Analyzing Real RNA-seq Data
 
 ```python
 import numpy as np
@@ -26,122 +21,105 @@ import pandas as pd
 import jax
 from global_upreg_seq import jax_run_pyro
 
-# Load count matrix (genes × samples) and condition labels
 counts = pd.read_csv("counts.csv", index_col=0)  # genes × samples
-labels = np.array([0, 0, 0, 1, 1, 1])  # 0=control, 1=treatment
+labels = np.array([0, 0, 0, 1, 1, 1])             # 0=control, 1=treatment
 
-# Run GlobSeq (pass counts as samples × genes)
 key = jax.random.PRNGKey(0)
 results, losses, svi = jax_run_pyro(
     counts.values.T,  # [N, P] — samples × genes
-    labels,
-    key,
-    iterations=3000,
-    use_size_factor_model=True,
+    labels, key, iterations=3000, use_size_factor_model=True,
 )
 
-# Build results table
 de_results = pd.DataFrame({
     "gene": counts.index,
     "log2fc": results["log2fc"],
     "plesser": results["plesser"],
 })
-
-# Call significant genes (plesser < 0.05 and |log2fc| > 1)
 de_results["significant"] = (de_results["plesser"] < 0.05) & (de_results["log2fc"].abs() > 1)
-print(f"DE genes: {de_results['significant'].sum()}")
 ```
 
-### Interpreting Results
+## Interpreting Results
 
-- **`log2fc`**: Posterior mean log₂ fold change per gene
-- **`plesser`**: P(|log fold change| < ln(2)) — the probability the true effect is small
-  - Lower = more significant. Call DE at `plesser < 0.05`
-  - Analogous to a p-value but derived from the full posterior
+- **`log2fc`** — posterior mean log₂ fold change per gene
+- **`plesser`** — P(|log FC| < ln 2), the probability the effect is small. Lower = more significant. Call DE at `plesser < 0.05`
 
-### Finding Stably Expressed (Non-DE) Genes
+### Finding Stably Expressed Genes
 
-A key advantage of GlobSeq's Bayesian framework is that you can directly identify genes with high confidence of *no* differential expression — useful for reference gene selection, normalization controls, or stable biomarker discovery.
+Unlike frequentist methods that can only fail to reject the null, `plesser` directly quantifies the probability a gene's fold change is small — giving positive evidence for stability.
 
 ```python
-# plesser = P(|log_fc| < ln(2)) — HIGH plesser means confidently non-DE
 de_results["stable"] = de_results["plesser"] > 0.95  # >95% probability of no change
-stable_genes = de_results[de_results["stable"]].sort_values("plesser", ascending=False)
-print(f"Stably expressed genes: {len(stable_genes)}")
 ```
 
-Unlike frequentist methods that can only fail to reject the null, `plesser` directly quantifies the probability that a gene's fold change is small — giving positive evidence for stability.
+## Design Matrices
 
-### Using Design Matrices
-
-GlobSeq supports arbitrary design matrices, not just two-group comparisons. The `labels` argument is actually a design matrix `x` of shape `[N, F]` where F is the number of factors. When you pass a 1D array of 0s and 1s, it's automatically reshaped to `[N, 1]`.
-
-For multi-factor designs, build your design matrix with [patsy](https://patsy.readthedocs.io/) or [formulaic](https://matthewwardrop.github.io/formulaic/):
+GlobSeq accepts arbitrary design matrices `[N, F]`. A 1D label array is reshaped to `[N, 1]` automatically.
 
 ```python
-import pandas as pd
-import numpy as np
 from formulaic import model_matrix  # pip install formulaic
 
-# Sample metadata
 metadata = pd.DataFrame({
-    "condition": ["ctrl", "ctrl", "ctrl", "treat", "treat", "treat",
-                  "ctrl", "ctrl", "ctrl", "treat", "treat", "treat"],
-    "batch":     ["A", "A", "A", "A", "A", "A",
-                  "B", "B", "B", "B", "B", "B"],
+    "condition": ["A", "A", "A", "B", "B", "B", "C", "C", "C"],
+    "batch":     ["x", "x", "y", "x", "y", "y", "x", "y", "y"],
 })
 
-# Two-group (simple case) — same as passing labels directly
-X_simple = model_matrix("~ condition", metadata)
-# Drops intercept since GlobSeq has its own (log_mu0)
-X = np.array(X_simple)[:, 1:]  # keep only the condition column, shape [12, 1]
+# Drop intercept — GlobSeq has its own (log_mu0)
+X = np.array(model_matrix("~ condition + batch", metadata))[:, 1:]
 
-# Multi-factor: condition + batch effect
-X_multi = model_matrix("~ condition + batch", metadata)
-X = np.array(X_multi)[:, 1:]  # drop intercept, shape [12, 2]
-# Column 0 = condition effect, Column 1 = batch effect
+results, losses, svi = jax_run_pyro(counts.values.T, X, key, iterations=3000)
+# results["log2fc"] is [F, P], results["plesser"] is [F, P]
 ```
 
-Then pass the design matrix directly:
+### Pairwise Comparisons from Multi-Category Designs
+
+With 4 categories (A, B, C, D) and A as reference, the design matrix gives 3 factors: B−A, C−A, D−A. Results vs the reference come directly from the output. For non-reference pairwise comparisons (e.g. B vs C), subtract the posterior parameters — variances add under the independent normal variational guide:
 
 ```python
-results, losses, svi = jax_run_pyro(
-    counts.values.T,  # [N, P]
-    X,                 # [N, F] design matrix
-    key,
-    iterations=3000,
-)
+import jax.numpy as jnp
+import numpyro.distributions as dist
+from itertools import combinations
 
-# results["log2fc"] is now [F, P] — one fold-change per factor per gene
-# results["plesser"] is [F, P] — significance per factor per gene
-# Column 0 = condition effect, Column 1 = batch effect
+def pairwise_plesser(svi, factor_names, cutoff=jnp.log(2.0)):
+    """Compute plesser for all pairwise comparisons from a multi-category fit.
+
+    Args:
+        svi: SVIRunResult from jax_run_pyro
+        factor_names: list of factor names matching design matrix columns
+        cutoff: significance cutoff in natural log scale (default ln(2))
+
+    Returns:
+        dict of {("B", "C"): plesser_array, ...} for all pairs
+    """
+    lfc_loc = svi.params["log_fc_auto_loc"]      # [F, P]
+    lfc_scale = svi.params["log_fc_auto_scale"]  # [F, P]
+    results = {}
+    for i, j in combinations(range(len(factor_names)), 2):
+        diff_loc = lfc_loc[i] - lfc_loc[j]
+        diff_scale = jnp.sqrt(lfc_scale[i]**2 + lfc_scale[j]**2)
+        results[(factor_names[i], factor_names[j])] = dist.Normal(
+            jnp.abs(diff_loc), diff_scale
+        ).cdf(cutoff)
+    return results
+
+# Usage
+pw = pairwise_plesser(svi, ["B", "C", "D"])
+for pair, plesser in pw.items():
+    print(f"{pair[0]} vs {pair[1]}: {(plesser < 0.05).sum()} DE genes")
 ```
 
-**With patsy** (alternative to formulaic):
+## Model Variants
 
 ```python
-import patsy
-
-# Build design matrix from formula
-X = patsy.dmatrix("~ condition + batch", metadata, return_type="dataframe")
-X = np.array(X)[:, 1:]  # drop intercept
-```
-
-**Important:** Always drop the intercept column from the design matrix — GlobSeq models its own intercept via `log_mu0`. The remaining columns correspond to the factors in `log_fc [F, P]`, so the first factor's results are in `results["log2fc"][0, :]` and `results["plesser"][0, :]`.
-
-### Model Variants
-
-```python
-# With size factor estimation (default) — for small datasets where its possible you
-# may have a very large bias in sample handling or processing between conditions
+# With size factor estimation (default) — for small datasets where you may have
+# large bias in sample handling or processing between conditions
 results, losses, svi = jax_run_pyro(counts.T, labels, key, use_size_factor_model=True)
 
-# Without size factors — useful when you have a lot of data to make training more
-# stable, with a more flexible representation of the data
+# Without size factors — useful when you have a lot of data to make training
+# more stable, with a more flexible representation of the data
 results, losses, svi = jax_run_pyro(counts.T, labels, key, use_size_factor_model=False)
 ```
 
-### Running Replicates
+## Replicates
 
 Different random keys give independent inference runs:
 
@@ -151,28 +129,22 @@ for rep in range(5):
     results, losses, svi = jax_run_pyro(counts.T, labels, key)
 ```
 
-### Simulated Data
+## Simulated Data
 
 ```python
 from global_upreg_seq import jax_generate_simulated_data
 
 counts, labels, (log_fc_true, size_factors, base_means) = jax_generate_simulated_data(
-    group_size=10,          # samples per condition
-    gene_size=30000,        # number of genes
-    median_log_upreg=1.5,   # effect size (natural log)
-    non_de_fraction=0.25,   # fraction with no DE (75% upregulated)
-    seed=42,
+    group_size=10, gene_size=30000, median_log_upreg=1.5,
+    non_de_fraction=0.25, seed=42,
 )
 ```
 
-### Setting the Compute Platform
+## Platform
 
 ```bash
-# Set before running Python (CPU)
-export JAX_PLATFORMS=cpu
-
-# For GPU
-export JAX_PLATFORMS=cuda
+export JAX_PLATFORMS=cpu   # laptops
+export JAX_PLATFORMS=cuda  # GPU
 ```
 
 ## Citation
