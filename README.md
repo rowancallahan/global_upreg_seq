@@ -1,6 +1,6 @@
 # GlobSeq
 
-Bayesian differential expression analysis for RNA-seq under global upregulation. Uses a spike-and-slab prior to jointly estimate fold changes and size factors, avoiding normalization bias when most genes are DE.
+Bayesian differential expression analysis for RNA-seq under global upregulation. Designed to be used in larger sample situations where global upregulation is expected and there are enough samples to safely learn it. This is potentially relevant in large cancer studies that have been processed consistently.
 
 ## Installation
 
@@ -158,11 +158,17 @@ export JAX_PLATFORMS=cuda  # GPU
 
 ## Roadmap
 
-- **Multi-factor design matrix initialization:** The model supports arbitrary `[N, F]` design matrices, but the data-driven initialization (`jax_prepare_norm_mode`, `jax_prepare_initialization`) currently assumes binary labels. For now, multi-factor designs will use a collapsed binary init (reference category vs everything else). Fix: detect base samples as rows where all categorical columns are zero.
-- **Mixed categorical + continuous covariates:** Requires a `factor_types` parameter so the init knows which columns are categorical (used to find the reference group) and which are continuous (ignored during init). The model and guide already handle this — only the init needs updating.
+- **Multi-factor design matrix initialization:** The model supports arbitrary `[N, F]` design matrices, but the data-driven initialization (`jax_prepare_norm_mode`, `jax_prepare_initialization`) currently assumes binary labels. For now, multi-factor designs will use a collapsed binary init (reference category vs everything else).
+- **Mixed categorical + continuous covariates:** Requires a `factor_types` parameter so the init knows which columns are categorical (used to find the reference group) and which are continuous (ignored during init).
 - **numpyro > 0.20.0 compatibility:** `numpyro.optim` and `numpyro.set_platform()` were removed in newer numpyro. Currently pinned to `numpyro==0.20.0`.
 - **CAVI inference:** Coordinate ascent variational inference as an alternative to SVI for faster convergence.
 
 ## Citation
 
-Manuscript in preparation.
+@article{callahan2026glorb,
+  title   = {GLORB: Robust Bayesian inference for differential expression under global expression shifts},
+  author  = {Callahan, Rowan and Coleman, Stephen D. and Ngo, Thuy T. M.},
+  journal = {bioRxiv},
+  year    = {2026},
+  url     = {https://github.com/rowancallahan/global_upreg_seq}
+}
