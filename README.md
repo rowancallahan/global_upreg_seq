@@ -166,11 +166,14 @@ export JAX_PLATFORMS=cuda  # GPU
 ## Citation
 
 ```bibtex
-@article{callahan2026glorb,
-  title   = {GLORB: Robust Bayesian inference for differential expression under global expression shifts},
-  author  = {Callahan, Rowan and Coleman, Stephen D. and Ngo, Thuy T. M.},
-  journal = {bioRxiv},
-  year    = {2026},
-  url     = {https://github.com/rowancallahan/global_upreg_seq}
-}
+  @article{callahan2026glorb,
+  title={GLORB: Robust Bayesian inference for differential expression under global expression shifts},
+  author={Callahan, Rowan L. and Coleman, Stephen D. and Ngo, Thuy T. M.},
+  year={2026},
+  month=sep,
+  journal={bioRxiv},
+  note={Preprint},
+  doi={10.64898/2026.08.28.747928},
+  url={https://doi.org/10.64898/2026.08.28.747928}
+  }
 ```
