@@ -1,8 +1,15 @@
 # GLORB
 
-Bayesian differential expression analysis for RNA-seq under global upregulation. Designed to be used in larger sample situations where global upregulation is expected and there are enough samples to safely learn it. This is potentially relevant in large cancer studies that have been processed consistently.
+Bayesian differential expression analysis for RNA-seq under global upregulation. Designed to be used in larger sample situations where global upregulation is expected and there are enough samples to safely learn it. This is potentially relevant to areas like large cancer studies that have been processed consistently but may have large differences between them.
 
 ## Installation
+
+```python
+pip install glorb-seq
+
+```
+
+You can also build from source by following the example below.
 
 ```bash
 git clone https://github.com/rowancallahan/global_upreg_seq.git
@@ -27,10 +34,8 @@ results, losses, svi = jax_run_pyro(counts.T, labels, key, use_size_factor_model
 
 ## Differences from DESeq2 and Other Methods
 
-- **Minimal filtering:** Only filter genes with fewer than 10 total counts across all samples. Unlike DESeq2, GlobSeq does not use geometric means for normalization, so genes with zero counts in some samples are handled naturally — no need for the strict filtering that DESeq2 requires to avoid undefined geometric means.
-- **No normalization step:** GlobSeq estimates size factors and fold changes jointly within the model, rather than as a separate preprocessing step. This avoids the circular dependency where normalization assumes most genes are not DE.
-- **Direct posterior inference:** Instead of p-values from a frequentist test, GlobSeq returns `plesser` — the posterior probability that a gene's fold change is small. This means you can make positive claims about non-DE genes (high `plesser`), not just fail to reject the null.
-- **Robust to global upregulation:** When a large fraction of genes are DE in the same direction, median-of-ratios normalization (DESeq2, edgeR) systematically underestimates fold changes. GlobSeq's spike-and-slab prior separates DE from non-DE genes during inference, avoiding this bias.
+- **Direct posterior inference:** Instead of p-values from a frequentist test, GLORB returns `plesser` — the posterior probability that a gene's absolute log fold change is small (below 1). This means you can make positive claims about non-DE genes (high `plesser`), not just fail to reject the null.
+- **Robust to global upregulation:** When a large fraction of genes are DE in the same direction, median-of-ratios normalization (DESeq2, edgeR) systematically underestimates fold changes. GlORB's spike-and-slab prior separates DE from non-DE genes during inference, avoiding this bias.
 
 ## Quick Start
 
@@ -64,7 +69,7 @@ de_results["significant"] = (de_results["plesser"] < 0.05) & (de_results["log2fc
 
 ### Finding Stably Expressed Genes
 
-Unlike frequentist methods that can only fail to reject the null, `plesser` directly quantifies the probability a gene's fold change is small — giving positive evidence for stability.
+ `plesser` directly quantifies the probability a gene's fold change is small.
 
 ```python
 de_results["stable"] = de_results["plesser"] > 0.95  # >95% probability of no change
@@ -74,7 +79,7 @@ de_results["stable"] = de_results["plesser"] > 0.95  # >95% probability of no ch
 
 > 🚧 **!! Multi-factor design matrices (F > 1) are not fully supported yet !!** The model architecture handles arbitrary `[N, F]` matrices, but the data-driven initialization assumes binary labels and will produce incorrect starting values for F > 1. Binary two-group comparisons (F = 1) work correctly. See [Roadmap](#roadmap) for details.
 
-GlobSeq accepts arbitrary design matrices `[N, F]`. A 1D label array is reshaped to `[N, 1]` automatically. For categorical variables, use one-hot encoding with K−1 columns (drop one category as the reference). Libraries like `formulaic` or `patsy` handle this automatically with formula syntax.
+GLORB accepts arbitrary design matrices `[N, F]`. A 1D label array is reshaped to `[N, 1]` automatically. For categorical variables, use one-hot encoding with K−1 columns (drop one category as the reference). Libraries like `formulaic` or `patsy` handle this automatically with formula syntax.
 
 ```python
 from formulaic import model_matrix  # pip install formulaic
