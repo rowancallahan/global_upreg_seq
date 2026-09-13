@@ -1,6 +1,7 @@
 [project]
 name = "glorb-seq"
-version = "0.1.0"
+version = "1.1.0"
+readme = "README.md"
 description = "differential gene expression under global upregulation"
 authors = [
     {name = "Rowan Callahan",email = "rowan.l.callahan@gmail.com"}
