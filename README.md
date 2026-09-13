@@ -1,4 +1,4 @@
-# GlobSeq
+# GLORB
 
 Bayesian differential expression analysis for RNA-seq under global upregulation. Designed to be used in larger sample situations where global upregulation is expected and there are enough samples to safely learn it. This is potentially relevant in large cancer studies that have been processed consistently.
 
