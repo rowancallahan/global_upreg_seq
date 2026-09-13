@@ -1,5 +1,5 @@
 [project]
-name = "global_upreg_seq"
+name = "glorb-seq"
 version = "0.1.0"
 description = "differential gene expression under global upregulation"
 authors = [
