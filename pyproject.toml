@@ -6,6 +6,7 @@ description = "differential gene expression under global upregulation"
 authors = [
     {name = "Rowan Callahan",email = "rowan.l.callahan@gmail.com"}
 ]
+license = "GPL-3.0-or-later"
 requires-python = ">=3.10"
 dependencies = [
     "numpyro==0.20.0",
@@ -31,4 +32,6 @@ manuscript = [
     "pydeseq2>=0.5.2",
 ]
 
-
+[project.urls]
+Repository = "https://github.com/rowancallahan/GLORB-seq"
+Paper = "https://doi.org/10.64898/2026.08.28.747928"
