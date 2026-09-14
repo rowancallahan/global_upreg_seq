@@ -8,6 +8,15 @@ authors = [
 ]
 requires-python = ">=3.10"
 dependencies = [
+    "numpyro==0.20.0",
+    "jax==0.9.1",
+    "optax>=0.2.7",
+    "numpy"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.2",
     "torch>=2.0.0",
     "pyro-ppl>=1.8.0",
     "pandas>=2.3.0,<3.0.0",
@@ -16,15 +25,8 @@ dependencies = [
     "jupyter (>=1.1.1,<2.0.0)",
     "ipykernel (>=6.30.1,<7.0.0)",
     "jupyterlab (>=4.4.6,<5.0.0)",
-    "matplotlib (>=3.10.5,<4.0.0)",
-    "pytest>=8.4.2",
-    "numpyro==0.20.0",
-    "jax==0.9.1",
-    "scipy>=1.15.3",
-    "optax>=0.2.7",
+    "matplotlib (>=3.10.5,<4.0.0)"
 ]
-
-[project.optional-dependencies]
 manuscript = [
     "pydeseq2>=0.5.2",
 ]
